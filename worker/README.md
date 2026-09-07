@@ -1,9 +1,10 @@
 # StoryScroll RunPod worker
 
 RunPod Serverless handler that downloads public Vercel Blob image/audio URLs, probes duration
-with ffprobe, renders the Remotion composition, and streams the MP4 back to Blob. It returns the
-output URL in the job result. The Next.js app polls RunPod for that result. There is no webhook
-and no database.
+with ffprobe, generates deterministic ASS credit lines, and renders the MP4 directly with FFmpeg.
+The interactive web preview still uses Remotion, but the cloud worker avoids Chromium's
+frame-by-frame overhead. It returns the output URL in the job result. The Next.js app polls
+RunPod for that result. There is no webhook and no database.
 
 ## Build
 
@@ -21,8 +22,7 @@ npm --prefix worker ci
 npm --prefix worker run build
 ```
 
-The image includes Chromium, FFmpeg/ffprobe, fonts, Node, Python, and the RunPod SDK.
-`CHROME_PATH` defaults to `/usr/bin/chromium`.
+The image includes FFmpeg/ffprobe with libass, Inter, Node, Python, and the RunPod SDK.
 
 ## Deploy to RunPod Serverless
 
@@ -84,6 +84,6 @@ Failed jobs raise a structured error that the Vercel poll route surfaces in the 
 ## Common failures
 
 - **Blob upload failure**: the worker is missing `BLOB_READ_WRITE_TOKEN`.
-- **Chromium launch failure**: keep `CHROME_PATH=/usr/bin/chromium` and the supplied image.
+- **Subtitle filter failure**: use the supplied Debian FFmpeg image, which includes libass.
 - **Audio duration failure**: corrupt media or duration over `MAX_AUDIO_DURATION_SECONDS`.
 - **Out of disk/memory**: increase the endpoint disk/RAM.

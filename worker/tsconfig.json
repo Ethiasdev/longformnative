@@ -17,5 +17,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", "../src/lib/story.ts", "../src/remotion/StoryComposition.tsx"]
+  "include": ["render.ts", "node-handler.ts", "../src/lib/story.ts"],
+  "exclude": ["**/*.test.ts"]
 }
