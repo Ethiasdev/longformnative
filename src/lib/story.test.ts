@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_FPS,
   DEFAULT_MAX_AUDIO_DURATION_SECONDS,
   DEFAULT_SETTINGS,
   MAX_TRANSCRIPT_CHARACTERS,
@@ -75,6 +76,7 @@ describe("measured word-safe wrapping", () => {
     const manifest = {
       transcript,
       durationSeconds: 60,
+      fps: 60,
       imageUrl: "https://example.com/image.jpg",
       audioUrl: "https://example.com/audio.mp3",
       settings: {
@@ -116,6 +118,7 @@ describe("settings and duration", () => {
       imageUrl: "blob:image",
       audioUrl: "blob:audio",
       settings: DEFAULT_SETTINGS,
+      fps: 60,
     };
     expect(editorInputSchema.safeParse({ ...base, durationSeconds: 3600 }).success).toBe(true);
     const result = editorInputSchema.safeParse({ ...base, durationSeconds: 3601 });
@@ -123,9 +126,13 @@ describe("settings and duration", () => {
     if (!result.success) expect(result.error.issues[0]?.message).toContain("60 minutes");
   });
 
-  it("maps 15 minutes to exactly 27,000 frames", () => {
-    expect(durationToFrames(15 * 60)).toBe(27_000);
-    expect(durationToFrames(1.001)).toBe(31);
+  it("maps duration to ceil(seconds * fps) at both output rates", () => {
+    expect(DEFAULT_FPS).toBe(60);
+    expect(durationToFrames(15 * 60, 30)).toBe(27_000);
+    expect(durationToFrames(15 * 60, 60)).toBe(54_000);
+    expect(durationToFrames(15 * 60)).toBe(54_000);
+    expect(durationToFrames(1.001, 30)).toBe(31);
+    expect(durationToFrames(1.001, 60)).toBe(61);
   });
 });
 
@@ -140,5 +147,29 @@ describe("layout motion", () => {
     expect(linearScrollY({ ...base, frame: 50 })).toBe(150);
     expect(linearScrollY({ ...base, frame: 100 })).toBe(-420);
     expect(linearScrollY({ ...base, frame: 101 })).toBe(-420);
+  });
+
+  it("keeps a floating-point Y and a constant step between frames", () => {
+    const base = { finalAudioFrame: 240, height: 1920, textHeight: 733 };
+    const values = [0, 1, 2, 3].map((frame) => linearScrollY({ ...base, frame }));
+    const step = values[1]! - values[0]!;
+    expect(values[0]).toBe(1920 * 0.72);
+    expect(Number.isInteger(values[1]!)).toBe(false);
+    expect(values[1]).not.toBe(Math.round(values[1]!));
+    expect(values[2]! - values[1]!).toBeCloseTo(step, 10);
+    expect(values[3]! - values[2]!).toBeCloseTo(step, 10);
+  });
+
+  it("returns the same Y when a frame is read again after seeking", () => {
+    const sample = { frame: 87, finalAudioFrame: 599, height: 1920, textHeight: 1400 };
+    expect(linearScrollY(sample)).toBe(linearScrollY(sample));
+    expect(linearScrollY({ ...sample, frame: 0 })).toBe(1920 * 0.72);
+    expect(linearScrollY({ ...sample, frame: 599 })).toBeCloseTo(1920 * 0.18 - 1400, 10);
+  });
+
+  it("reuses the same wrapped layout object when inputs are unchanged", () => {
+    const first = wrap("one two\n\nthree four", 90);
+    const second = wrap("one two\n\nthree four", 90);
+    expect(second).toBe(first);
   });
 });

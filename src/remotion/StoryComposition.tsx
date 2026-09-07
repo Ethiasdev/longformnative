@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   AbsoluteFill,
   Audio,
@@ -13,6 +13,8 @@ import {
   INTER_FONT_FAMILY,
   linearScrollY,
   type StoryCompositionProps,
+  type StorySettings,
+  type WrappedTranscript,
 } from "../lib/story";
 
 let interFontPromise: Promise<void> | null = null;
@@ -31,7 +33,11 @@ function loadInterFont(): Promise<void> {
   return interFontPromise;
 }
 
-function StoryImage({
+function resolveAsset(value: string) {
+  return /^(?:https?:|blob:|data:)/.test(value) ? value : staticFile(value);
+}
+
+const StoryImage = memo(function StoryImage({
   src,
   focalPosition,
 }: {
@@ -64,9 +70,89 @@ function StoryImage({
       }}
     />
   );
-}
+});
 
-export function StoryComposition({
+const CreditsColumn = memo(function CreditsColumn({
+  settings,
+  wrapped,
+}: {
+  settings: StorySettings;
+  wrapped: WrappedTranscript;
+}) {
+  return (
+    <>
+      {wrapped.paragraphs.map((paragraph, paragraphIndex) => (
+        <div
+          key={paragraphIndex}
+          style={{
+            marginBottom:
+              paragraphIndex < wrapped.paragraphs.length - 1
+                ? settings.paragraphGap
+                : 0,
+          }}
+        >
+          {paragraph.lines.map((line, lineIndex) => (
+            <div key={lineIndex}>{line}</div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+});
+
+const CreditsScroller = memo(function CreditsScroller({
+  settings,
+  wrapped,
+}: {
+  settings: StorySettings;
+  wrapped: WrappedTranscript;
+}) {
+  const frame = useCurrentFrame();
+  const { durationInFrames, height, width } = useVideoConfig();
+  const y = linearScrollY({
+    frame,
+    finalAudioFrame: durationInFrames - 1,
+    height,
+    textHeight: wrapped.textHeight,
+  });
+  const columnLeft = (width - settings.textColumnWidth) / 2;
+
+  return (
+    <div
+      data-credits-scroller="true"
+      data-scroll-y={String(y)}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: columnLeft,
+        width: settings.textColumnWidth,
+        transform: `translate3d(0, ${y}px, 0)`,
+        willChange: "transform",
+        backfaceVisibility: "hidden",
+        color: "#ffffff",
+        fontFamily: `"${INTER_FONT_FAMILY}"`,
+        fontSize: settings.fontSize,
+        fontWeight: 700,
+        lineHeight: settings.lineHeight,
+        letterSpacing: 0,
+        textAlign: "center",
+        WebkitTextStroke: `${settings.outlineWidth}px #000000`,
+        WebkitTextStrokeWidth: `${settings.outlineWidth}px`,
+        WebkitTextStrokeColor: "#000000",
+        paintOrder: "stroke fill",
+        textShadow: "0 2px 5px rgba(0,0,0,0.65)",
+        whiteSpace: "pre-wrap",
+        wordBreak: "normal",
+        overflowWrap: "normal",
+        hyphens: "none",
+      }}
+    >
+      <CreditsColumn settings={settings} wrapped={wrapped} />
+    </div>
+  );
+});
+
+export const StoryComposition = memo(function StoryComposition({
   imageUrl,
   audioUrl,
   settings,
@@ -79,70 +165,28 @@ export function StoryComposition({
       .catch((error) => cancelRender(error));
   }, [fontHandle]);
 
-  const resolveAsset = (value: string) =>
-    /^(?:https?:|blob:|data:)/.test(value) ? value : staticFile(value);
-  const frame = useCurrentFrame();
-  const { durationInFrames, height, width } = useVideoConfig();
-  const y = linearScrollY({
-    frame,
-    finalAudioFrame: durationInFrames - 1,
-    height,
-    textHeight: wrapped.textHeight,
-  });
+  const resolvedImage = useMemo(
+    () => (imageUrl ? resolveAsset(imageUrl) : ""),
+    [imageUrl],
+  );
+  const resolvedAudio = useMemo(
+    () => (audioUrl ? resolveAsset(audioUrl) : ""),
+    [audioUrl],
+  );
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#111111", overflow: "hidden" }}>
-      {imageUrl ? (
+      {resolvedImage ? (
         <StoryImage
-          src={resolveAsset(imageUrl)}
+          src={resolvedImage}
           focalPosition={settings.imageVerticalFocalPosition}
         />
       ) : null}
       <AbsoluteFill
         style={{ backgroundColor: `rgba(0,0,0,${settings.backgroundDarkening})` }}
       />
-      {audioUrl ? <Audio src={resolveAsset(audioUrl)} /> : null}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: (width - settings.textColumnWidth) / 2,
-          width: settings.textColumnWidth,
-          transform: `translateY(${y}px)`,
-          color: "#ffffff",
-          fontFamily: `"${INTER_FONT_FAMILY}"`,
-          fontSize: settings.fontSize,
-          fontWeight: 700,
-          lineHeight: settings.lineHeight,
-          letterSpacing: 0,
-          textAlign: "center",
-          WebkitTextStroke: `${settings.outlineWidth}px #000000`,
-          WebkitTextStrokeWidth: `${settings.outlineWidth}px`,
-          WebkitTextStrokeColor: "#000000",
-          paintOrder: "stroke fill",
-          textShadow: "0 2px 5px rgba(0,0,0,0.65)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "normal",
-          overflowWrap: "normal",
-          hyphens: "none",
-        }}
-      >
-        {wrapped.paragraphs.map((paragraph, paragraphIndex) => (
-          <div
-            key={paragraphIndex}
-            style={{
-              marginBottom:
-                paragraphIndex < wrapped.paragraphs.length - 1
-                  ? settings.paragraphGap
-                  : 0,
-            }}
-          >
-            {paragraph.lines.map((line, lineIndex) => (
-              <div key={lineIndex}>{line}</div>
-            ))}
-          </div>
-        ))}
-      </div>
+      {resolvedAudio ? <Audio src={resolvedAudio} /> : null}
+      <CreditsScroller settings={settings} wrapped={wrapped} />
     </AbsoluteFill>
   );
-}
+});

@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-export const FPS = 30;
+export const OUTPUT_FRAME_RATES = [30, 60] as const;
+export type OutputFrameRate = (typeof OUTPUT_FRAME_RATES)[number];
+export const DEFAULT_FPS: OutputFrameRate = 60;
+export const FPS = DEFAULT_FPS;
 export const VIDEO_WIDTH = 1080;
 export const VIDEO_HEIGHT = 1920;
 export const DEFAULT_MAX_AUDIO_DURATION_SECONDS = 60 * 60;
@@ -30,6 +33,8 @@ export const transcriptSchema = z
         `Transcript must be ${MAX_TRANSCRIPT_CHARACTERS.toLocaleString("en-US")} characters or fewer.`,
       ),
   );
+
+export const fpsSchema = z.union([z.literal(30), z.literal(60)]);
 
 export const settingsSchema = z.object({
   fontSize: z.number().int().min(54).max(82),
@@ -63,6 +68,7 @@ export function createEditorInputSchema(
     imageUrl: z.string().min(1, "Choose a background image."),
     audioUrl: z.string().min(1, "Choose an audio file."),
     settings: settingsSchema,
+    fps: fpsSchema,
   });
 }
 
@@ -134,6 +140,7 @@ export type StoryCompositionProps = {
   imageUrl: string;
   audioUrl: string;
   durationSeconds: number;
+  fps: OutputFrameRate;
   settings: StorySettings;
   wrapped: WrappedTranscript;
 };
@@ -155,14 +162,21 @@ export const DEFAULT_SETTINGS: StorySettings = {
   imageVerticalFocalPosition: 50,
 };
 
+const normalizeCache = new Map<string, string>();
+
 export function normalizeTranscript(value: string): string {
-  return value
+  const cached = normalizeCache.get(value);
+  if (cached !== undefined) return cached;
+  const normalized = value
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  if (normalizeCache.size > 64) normalizeCache.clear();
+  normalizeCache.set(value, normalized);
+  return normalized;
 }
 
 export function splitParagraphs(value: string): string[] {
@@ -198,7 +212,7 @@ export function createMeasuredTranscriptSchema(maxWidth: number, measure: Measur
   });
 }
 
-export function durationToFrames(seconds: number, fps = FPS): number {
+export function durationToFrames(seconds: number, fps: number = DEFAULT_FPS): number {
   if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isFinite(fps) || fps <= 0) return 1;
   return Math.max(1, Math.ceil(seconds * fps));
 }
@@ -214,6 +228,24 @@ export function calculateTextHeight(
   return lineCount * fontSize * lineHeight + Math.max(0, paragraphCount - 1) * paragraphGap;
 }
 
+const wrapCache = new Map<string, WrappedTranscript>();
+
+export function wrapCacheKey(params: {
+  transcript: string;
+  maxWidth: number;
+  fontSize: number;
+  lineHeight: number;
+  paragraphGap: number;
+}): string {
+  return [
+    params.transcript,
+    params.maxWidth,
+    params.fontSize,
+    params.lineHeight,
+    params.paragraphGap,
+  ].join("\u001f");
+}
+
 export function wrapTranscript(params: {
   transcript: string;
   maxWidth: number;
@@ -222,6 +254,10 @@ export function wrapTranscript(params: {
   lineHeight: number;
   paragraphGap: number;
 }): WrappedTranscript {
+  const cacheKey = wrapCacheKey(params);
+  const cached = wrapCache.get(cacheKey);
+  if (cached) return cached;
+
   const result = createMeasuredTranscriptSchema(params.maxWidth, params.measure).safeParse(
     params.transcript,
   );
@@ -245,7 +281,7 @@ export function wrapTranscript(params: {
     return { lines };
   });
   const lineCount = paragraphs.reduce((sum, paragraph) => sum + paragraph.lines.length, 0);
-  return {
+  const wrapped = {
     paragraphs,
     lineCount,
     textHeight: calculateTextHeight(
@@ -256,6 +292,13 @@ export function wrapTranscript(params: {
       params.paragraphGap,
     ),
   };
+  if (wrapCache.size > 32) wrapCache.clear();
+  wrapCache.set(cacheKey, wrapped);
+  return wrapped;
+}
+
+export function isOutputFrameRate(value: number): value is OutputFrameRate {
+  return value === 30 || value === 60;
 }
 
 export function linearScrollY(params: {

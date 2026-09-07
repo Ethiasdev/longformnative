@@ -2,10 +2,10 @@ import React from "react";
 import { Composition, registerRoot } from "remotion";
 import { StoryComposition } from "../src/remotion/StoryComposition";
 import {
-  FPS,
+  DEFAULT_FPS,
+  DEFAULT_SETTINGS,
   VIDEO_HEIGHT,
   VIDEO_WIDTH,
-  DEFAULT_SETTINGS,
   durationToFrames,
   type StoryCompositionProps,
 } from "../src/lib/story";
@@ -14,6 +14,7 @@ const placeholder: StoryCompositionProps = {
   imageUrl: "",
   audioUrl: "",
   durationSeconds: 1,
+  fps: DEFAULT_FPS,
   settings: DEFAULT_SETTINGS,
   wrapped: {
     paragraphs: [{ lines: ["StoryScroll"] }],
@@ -29,11 +30,12 @@ function RemotionRoot() {
       component={StoryComposition}
       width={VIDEO_WIDTH}
       height={VIDEO_HEIGHT}
-      fps={FPS}
-      durationInFrames={durationToFrames(placeholder.durationSeconds)}
+      fps={DEFAULT_FPS}
+      durationInFrames={durationToFrames(placeholder.durationSeconds, placeholder.fps)}
       defaultProps={placeholder}
       calculateMetadata={({ props }) => ({
-        durationInFrames: durationToFrames(props.durationSeconds),
+        fps: props.fps,
+        durationInFrames: durationToFrames(props.durationSeconds, props.fps),
       })}
     />
   );

@@ -5,9 +5,14 @@ import {
   wrapTranscript,
 } from "@/lib/story";
 
+export type LayoutSettings = Pick<
+  StorySettings,
+  "fontSize" | "textColumnWidth" | "lineHeight" | "paragraphGap"
+>;
+
 export function measureAndWrapTranscript(
   transcript: string,
-  settings: StorySettings,
+  settings: LayoutSettings,
 ): WrappedTranscript {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");

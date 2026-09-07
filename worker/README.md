@@ -44,6 +44,7 @@ The Vercel route posts this body to `https://api.runpod.ai/v2/<RUNPOD_ENDPOINT_I
     "audioUrl": "https://example.blob.vercel-storage.com/narration.mp3",
     "transcript": "Every great story begins with a moment.\n\nThen it continues.",
     "durationSeconds": 12.5,
+    "fps": 60,
     "settings": {
       "fontSize": 68,
       "textColumnWidth": 860,
@@ -73,7 +74,7 @@ Successful RunPod `COMPLETED` output:
 {
   "ok": true,
   "outputUrl": "https://example.blob.vercel-storage.com/storyscroll.mp4",
-  "frames": 375
+  "frames": 750
 }
 ```
 

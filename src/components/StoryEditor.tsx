@@ -1,23 +1,21 @@
 "use client";
 
-import { Player } from "@remotion/player";
 import { AudioLines, CheckCircle2, Download, ImageIcon, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { StoryComposition } from "@/remotion/StoryComposition";
+import { StoryPreview } from "@/components/StoryPreview";
 import { measureAndWrapTranscript } from "@/lib/browser-layout";
 import {
   AUDIO_MIME_TYPES,
+  DEFAULT_FPS,
   DEFAULT_MAX_AUDIO_DURATION_SECONDS,
   DEFAULT_SETTINGS,
-  FPS,
   IMAGE_MIME_TYPES,
   INTER_FONT_FAMILY,
-  VIDEO_HEIGHT,
-  VIDEO_WIDTH,
   createEditorInputSchema,
-  durationToFrames,
+  isOutputFrameRate,
   normalizeTranscript,
   storyManifestSchema,
+  type OutputFrameRate,
   type StoryCompositionProps,
   type StorySettings,
 } from "@/lib/story";
@@ -84,6 +82,7 @@ export function StoryEditor() {
   const [audioMetadataLoading, setAudioMetadataLoading] = useState(false);
   const [fontState, setFontState] = useState<FontState>("loading");
   const [settings, setSettings] = useState<StorySettings>(DEFAULT_SETTINGS);
+  const [fps, setFps] = useState<OutputFrameRate>(DEFAULT_FPS);
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ state: "idle" });
   const [missingVariables, setMissingVariables] = useState<string[]>([]);
   const [configurationLoaded, setConfigurationLoaded] = useState(false);
@@ -152,11 +151,20 @@ export function StoryEditor() {
     return () => window.clearTimeout(timer);
   }, [exportStatus]);
 
+  const layoutSettings = useMemo(
+    () => ({
+      fontSize: settings.fontSize,
+      textColumnWidth: settings.textColumnWidth,
+      lineHeight: settings.lineHeight,
+      paragraphGap: settings.paragraphGap,
+    }),
+    [settings.fontSize, settings.lineHeight, settings.paragraphGap, settings.textColumnWidth],
+  );
   const layoutResult = useMemo(() => {
     if (fontState !== "ready") return { wrapped: null, error: null };
     try {
       return {
-        wrapped: measureAndWrapTranscript(debouncedTranscript, settings),
+        wrapped: measureAndWrapTranscript(debouncedTranscript, layoutSettings),
         error: null,
       };
     } catch (error) {
@@ -165,18 +173,19 @@ export function StoryEditor() {
         error: error instanceof Error ? error.message : "Unable to lay out transcript.",
       };
     }
-  }, [debouncedTranscript, fontState, settings]);
+  }, [debouncedTranscript, fontState, layoutSettings]);
 
-  const previewProps: StoryCompositionProps | null =
-    layoutResult.wrapped && image && audio && durationSeconds > 0
-    ? {
-        imageUrl: image.url,
-        audioUrl: audio.url,
-        durationSeconds,
-        settings,
-        wrapped: layoutResult.wrapped,
-      }
-    : null;
+  const previewProps = useMemo<StoryCompositionProps | null>(() => {
+    if (!layoutResult.wrapped || !image || !audio || durationSeconds <= 0) return null;
+    return {
+      imageUrl: image.url,
+      audioUrl: audio.url,
+      durationSeconds,
+      fps,
+      settings,
+      wrapped: layoutResult.wrapped,
+    };
+  }, [audio, durationSeconds, fps, image, layoutResult.wrapped, settings]);
 
   const validation = createEditorInputSchema(maxAudioDuration).safeParse({
     transcript,
@@ -184,6 +193,7 @@ export function StoryEditor() {
     imageUrl: image?.url ?? "",
     audioUrl: audio?.url ?? "",
     settings,
+    fps,
   });
   const validationMessage = validation.success
     ? null
@@ -360,7 +370,7 @@ export function StoryEditor() {
                 <h2 className="section-title">9:16 video</h2>
               </div>
               <span className="whitespace-nowrap text-xs text-zinc-500">
-                {formatDuration(durationSeconds)} · {FPS} fps
+                {formatDuration(durationSeconds)} · {fps} fps
               </span>
             </div>
             <div
@@ -378,17 +388,7 @@ export function StoryEditor() {
                   Inter Bold failed to load. Preview and export are unavailable.
                 </div>
               ) : previewProps ? (
-                <Player
-                  key={`${audio?.url ?? "no-audio"}-${durationSeconds}`}
-                  component={StoryComposition}
-                  inputProps={previewProps}
-                  durationInFrames={durationToFrames(durationSeconds || 1)}
-                  compositionWidth={VIDEO_WIDTH}
-                  compositionHeight={VIDEO_HEIGHT}
-                  fps={FPS}
-                  controls
-                  style={{ width: "100%", aspectRatio: "9 / 16" }}
-                />
+                <StoryPreview key={`${audio?.url ?? "no-audio"}-${fps}`} props={previewProps} />
               ) : (
                 <div className="grid aspect-[9/16] place-items-center p-6 text-center text-sm text-zinc-500">
                   Add media to preview your story.
@@ -416,6 +416,23 @@ export function StoryEditor() {
               <Range label="Outline width" value={settings.outlineWidth} min={2} max={8} suffix=" px" onChange={(value) => setSetting("outlineWidth", value)} />
               <Range label="Background darkening" value={Math.round(settings.backgroundDarkening * 100)} min={0} max={60} suffix="%" onChange={(value) => setSetting("backgroundDarkening", value / 100)} />
               <Range label="Image focal position" value={settings.imageVerticalFocalPosition} min={0} max={100} suffix="%" onChange={(value) => setSetting("imageVerticalFocalPosition", value)} />
+              <label className="text-sm font-medium text-zinc-300">
+                <span className="flex justify-between">
+                  <span>Output frame rate</span>
+                  <span className="text-xs text-zinc-500">{fps} fps</span>
+                </span>
+                <select
+                  className="field mt-4 py-2"
+                  value={fps}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    if (isOutputFrameRate(next)) setFps(next);
+                  }}
+                >
+                  <option value={60}>60 FPS — smoother credits</option>
+                  <option value={30}>30 FPS — faster render</option>
+                </select>
+              </label>
             </div>
           </details>
 

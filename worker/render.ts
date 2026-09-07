@@ -88,7 +88,7 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       imageUrl: basename(imagePath),
       audioUrl: basename(audioPath),
     };
-    const frames = durationToFrames(durationSeconds);
+    const frames = durationToFrames(durationSeconds, manifest.fps);
 
     const serveUrl = await bundle({
       entryPoint: resolve(process.cwd(), "worker/remotion-entry.tsx"),

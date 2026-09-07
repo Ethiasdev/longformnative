@@ -1,6 +1,17 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
+declare global {
+  interface Window {
+    __storyPreview?: {
+      seek: (frame: number) => void;
+      play: () => void;
+      pause: () => void;
+      getCurrentFrame: () => number | null;
+    };
+  }
+}
+
 test("selects media, edits transcript, prepares preview, and validates export config", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
@@ -32,6 +43,36 @@ test("selects media, edits transcript, prepares preview, and validates export co
     }),
   ).toBe(true);
   await expect.poll(() => preview.locator("video, audio").count()).toBeGreaterThan(0);
+  await expect(page.getByText(/· 60 fps/)).toBeVisible();
+
+  const scroller = preview.locator("[data-credits-scroller]");
+  await expect(scroller).toBeVisible();
+  await expect(scroller).toHaveAttribute("style", /translate3d\(0px,/);
+  const readY = async () => Number(await scroller.getAttribute("data-scroll-y"));
+  const startY = await readY();
+  expect(Number.isFinite(startY)).toBe(true);
+
+  await expect.poll(() => page.evaluate(() => Boolean(window.__storyPreview))).toBe(true);
+  await page.evaluate(() => window.__storyPreview?.seek(10_000));
+  const endY = await readY();
+  expect(endY).toBeLessThan(startY);
+
+  await page.evaluate(() => window.__storyPreview?.seek(0));
+  await expect.poll(readY).toBeCloseTo(startY, 5);
+
+  await page.evaluate(() => window.__storyPreview?.seek(15));
+  const midY = await readY();
+  expect(midY).toBeLessThan(startY);
+  expect(midY).toBeGreaterThan(endY);
+
+  await page.evaluate(() => window.__storyPreview?.play());
+  await expect.poll(readY).toBeLessThan(startY);
+  const playingY = await readY();
+  await page.evaluate(() => window.__storyPreview?.pause());
+  const pausedY = await readY();
+  expect(Math.abs(pausedY - playingY)).toBeLessThan(40);
+  await page.evaluate(() => window.__storyPreview?.seek(0));
+  await expect.poll(readY).toBeCloseTo(startY, 5);
 
   const exportButton = page.getByRole("button", { name: "Export MP4" });
   await expect(exportButton).toBeDisabled();

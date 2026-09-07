@@ -1,7 +1,9 @@
 # StoryScroll
 
 A private single-user Next.js editor that turns one vertical image, one ElevenLabs
-narration file, and a pasted transcript into a 1080x1920 MP4.
+narration file, and a pasted transcript into a 1080x1920 MP4. Credits scroll with a
+linear `translate3d` path. Export defaults to 60 FPS for smoother movement; 30 FPS
+is available for faster renders.
 
 ## Architecture
 
@@ -74,9 +76,11 @@ npm run build
 npm --prefix worker run build
 npx playwright install chromium
 npm run test:e2e
+npm run motion:samples
 ```
 
 `npm run fixtures` generates an original PNG and WAV for the browser test.
+`npm run motion:samples` writes short 30 and 60 FPS MP4s to `motion-samples/` using the same scroll formula.
 
 Production export:
 
