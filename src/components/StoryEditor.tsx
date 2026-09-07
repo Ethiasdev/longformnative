@@ -2,7 +2,7 @@
 
 import { Player } from "@remotion/player";
 import { AudioLines, CheckCircle2, Download, ImageIcon, Settings2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { StoryComposition } from "@/remotion/StoryComposition";
 import { measureAndWrapTranscript } from "@/lib/browser-layout";
 import {
@@ -37,12 +37,26 @@ type LocalMedia = { file: File; name: string; url: string };
 type FontState = "loading" | "ready" | "error";
 
 function useMediaCleanup(media: LocalMedia | null) {
-  useEffect(
-    () => () => {
-      if (media) URL.revokeObjectURL(media.url);
-    },
-    [media],
-  );
+  const pendingRevocations = useRef(new Map<string, number>());
+  useEffect(() => {
+    const revocations = pendingRevocations.current;
+    const url = media?.url;
+    if (url) {
+      const pending = revocations.get(url);
+      if (pending !== undefined) {
+        window.clearTimeout(pending);
+        revocations.delete(url);
+      }
+    }
+    return () => {
+      if (!url) return;
+      const timer = window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+        revocations.delete(url);
+      }, 0);
+      revocations.set(url, timer);
+    };
+  }, [media]);
 }
 
 function useDebouncedValue<T>(value: T, delay: number): T {
@@ -273,8 +287,8 @@ export function StoryEditor() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1480px] gap-6 px-4 py-6 md:px-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:px-8">
-        <section className="space-y-5">
+      <div className="mx-auto grid max-w-[1480px] gap-5 px-4 py-5 md:px-6 lg:grid-cols-[minmax(340px,1fr)_minmax(240px,320px)_minmax(280px,340px)] lg:px-8">
+        <section aria-label="Story source" className="min-w-0">
           <div className="panel p-5">
             <div className="mb-4 flex items-end justify-between gap-4">
               <div>
@@ -286,7 +300,7 @@ export function StoryEditor() {
               </span>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
               <FilePicker
                 icon={<ImageIcon size={18} />}
                 label="Background image"
@@ -334,36 +348,16 @@ export function StoryEditor() {
               </p>
             ) : null}
           </div>
-
-          <details className="panel group p-5">
-            <summary className="flex cursor-pointer list-none items-center gap-3">
-              <Settings2 size={18} className="text-zinc-400" />
-              <div>
-                <p className="eyebrow">Text settings</p>
-                <h2 className="section-title">Typography and framing</h2>
-              </div>
-              <span className="ml-auto text-xs text-zinc-500 group-open:hidden">Expand</span>
-            </summary>
-            <div className="mt-6 grid gap-x-8 gap-y-6 border-t border-zinc-800 pt-6 md:grid-cols-2">
-              <Range label="Font size" value={settings.fontSize} min={54} max={82} suffix=" px" onChange={(value) => setSetting("fontSize", value)} />
-              <Range label="Text column" value={settings.textColumnWidth} min={720} max={920} suffix=" px" onChange={(value) => setSetting("textColumnWidth", value)} />
-              <Range label="Line height" value={settings.lineHeight} min={1.1} max={1.4} step={0.01} onChange={(value) => setSetting("lineHeight", value)} />
-              <Range label="Paragraph gap" value={settings.paragraphGap} min={16} max={52} suffix=" px" onChange={(value) => setSetting("paragraphGap", value)} />
-              <Range label="Outline width" value={settings.outlineWidth} min={2} max={8} suffix=" px" onChange={(value) => setSetting("outlineWidth", value)} />
-              <Range label="Background darkening" value={Math.round(settings.backgroundDarkening * 100)} min={0} max={60} suffix="%" onChange={(value) => setSetting("backgroundDarkening", value / 100)} />
-              <Range label="Image focal position" value={settings.imageVerticalFocalPosition} min={0} max={100} suffix="%" onChange={(value) => setSetting("imageVerticalFocalPosition", value)} />
-            </div>
-          </details>
         </section>
 
-        <aside className="lg:sticky lg:top-6 lg:self-start">
-          <div className="panel p-5">
-            <div className="mb-4 flex items-end justify-between">
+        <section aria-label="Story preview" className="min-w-0 lg:sticky lg:top-5 lg:self-start">
+          <div className="panel p-4">
+            <div className="mb-3 flex items-end justify-between gap-3">
               <div>
                 <p className="eyebrow">Preview</p>
                 <h2 className="section-title">9:16 video</h2>
               </div>
-              <span className="text-xs text-zinc-500">
+              <span className="whitespace-nowrap text-xs text-zinc-500">
                 {formatDuration(durationSeconds)} · {FPS} fps
               </span>
             </div>
@@ -371,7 +365,7 @@ export function StoryEditor() {
               role="region"
               aria-label="Video preview"
               data-ready={previewProps ? "true" : "false"}
-              className="relative mx-auto w-full max-w-[300px] overflow-hidden rounded-lg border border-zinc-800 bg-black"
+              className="relative mx-auto w-full max-w-[280px] overflow-hidden rounded-lg border border-zinc-800 bg-black"
             >
               {fontState === "loading" ? (
                 <div className="grid aspect-[9/16] place-items-center text-sm text-zinc-400">
@@ -399,12 +393,35 @@ export function StoryEditor() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
 
-            <div className="mt-5 border-t border-zinc-800 pt-4">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-200">
-                <CheckCircle2 size={16} className="text-zinc-400" />
-                Export readiness
+        <aside aria-label="Text settings and export" className="min-w-0 space-y-5 lg:sticky lg:top-5 lg:self-start">
+          <details className="panel group p-5">
+            <summary className="flex cursor-pointer list-none items-center gap-3">
+              <Settings2 size={18} className="text-zinc-400" />
+              <div>
+                <p className="eyebrow">Text settings</p>
+                <h2 className="section-title">Typography and framing</h2>
               </div>
+              <span className="ml-auto text-xs text-zinc-500 group-open:hidden">Expand</span>
+            </summary>
+            <div className="mt-6 grid gap-y-6 border-t border-zinc-800 pt-6">
+              <Range label="Font size" value={settings.fontSize} min={54} max={82} suffix=" px" onChange={(value) => setSetting("fontSize", value)} />
+              <Range label="Text column" value={settings.textColumnWidth} min={720} max={920} suffix=" px" onChange={(value) => setSetting("textColumnWidth", value)} />
+              <Range label="Line height" value={settings.lineHeight} min={1.1} max={1.4} step={0.01} onChange={(value) => setSetting("lineHeight", value)} />
+              <Range label="Paragraph gap" value={settings.paragraphGap} min={16} max={52} suffix=" px" onChange={(value) => setSetting("paragraphGap", value)} />
+              <Range label="Outline width" value={settings.outlineWidth} min={2} max={8} suffix=" px" onChange={(value) => setSetting("outlineWidth", value)} />
+              <Range label="Background darkening" value={Math.round(settings.backgroundDarkening * 100)} min={0} max={60} suffix="%" onChange={(value) => setSetting("backgroundDarkening", value / 100)} />
+              <Range label="Image focal position" value={settings.imageVerticalFocalPosition} min={0} max={100} suffix="%" onChange={(value) => setSetting("imageVerticalFocalPosition", value)} />
+            </div>
+          </details>
+
+          <div className="panel p-5">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-200">
+              <CheckCircle2 size={16} className="text-zinc-400" />
+              Export readiness
+            </div>
               {validationMessage ? (
                 <p className="text-xs leading-5 text-zinc-500">{validationMessage}</p>
               ) : null}
@@ -445,7 +462,6 @@ export function StoryEditor() {
                     ? "Export MP4"
                     : "Preparing export…"}
               </button>
-            </div>
           </div>
         </aside>
       </div>

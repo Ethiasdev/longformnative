@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   AbsoluteFill,
   Audio,
-  Img,
   cancelRender,
   continueRender,
   delayRender,
@@ -32,6 +31,41 @@ function loadInterFont(): Promise<void> {
   return interFontPromise;
 }
 
+function StoryImage({
+  src,
+  focalPosition,
+}: {
+  src: string;
+  focalPosition: number;
+}) {
+  const [imageHandle] = useState(() => delayRender("Loading story image"));
+  useEffect(() => {
+    const preloader = new Image();
+    preloader.onload = () => continueRender(imageHandle);
+    preloader.onerror = () => cancelRender(new Error("The story image could not be decoded."));
+    preloader.src = src;
+    return () => {
+      preloader.onload = null;
+      preloader.onerror = null;
+    };
+  }, [imageHandle, src]);
+
+  return (
+    // A native image avoids duplicate decode attempts in the interactive Remotion Player.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      style={{
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        objectPosition: `50% ${focalPosition}%`,
+      }}
+    />
+  );
+}
+
 export function StoryComposition({
   imageUrl,
   audioUrl,
@@ -59,14 +93,9 @@ export function StoryComposition({
   return (
     <AbsoluteFill style={{ backgroundColor: "#111111", overflow: "hidden" }}>
       {imageUrl ? (
-        <Img
+        <StoryImage
           src={resolveAsset(imageUrl)}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            objectPosition: `50% ${settings.imageVerticalFocalPosition}%`,
-          }}
+          focalPosition={settings.imageVerticalFocalPosition}
         />
       ) : null}
       <AbsoluteFill
