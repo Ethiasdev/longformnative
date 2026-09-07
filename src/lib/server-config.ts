@@ -2,14 +2,15 @@ import { DEFAULT_MAX_AUDIO_DURATION_SECONDS } from "./story";
 
 const requiredServerVariables = [
   "BLOB_READ_WRITE_TOKEN",
-  "DATABASE_URL",
   "RUNPOD_API_KEY",
   "RUNPOD_ENDPOINT_ID",
-  "RENDER_WEBHOOK_SECRET",
-  "APP_BASE_URL",
 ] as const;
 
 export type ServerVariable = (typeof requiredServerVariables)[number];
+
+export function getRequiredServerVariables(): readonly ServerVariable[] {
+  return requiredServerVariables;
+}
 
 export function getConfigurationStatus() {
   const missing = requiredServerVariables.filter((name) => !process.env[name]?.trim());

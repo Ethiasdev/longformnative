@@ -6,7 +6,11 @@ export const metadata: Metadata = {
   description: "Turn narration and transcripts into elegant scrolling story videos.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full">{children}</body>

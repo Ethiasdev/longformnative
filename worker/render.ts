@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -8,7 +9,6 @@ import { spawn } from "node:child_process";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { put } from "@vercel/blob";
-import { z } from "zod";
 import {
   DEFAULT_MAX_AUDIO_DURATION_SECONDS,
   createStoryManifestSchema,
@@ -21,17 +21,6 @@ function getMaxAudioDurationSeconds(): number {
     ? Math.floor(configured)
     : DEFAULT_MAX_AUDIO_DURATION_SECONDS;
 }
-
-const inputSchema = z.object({
-  jobId: z.uuid(),
-  imageUrl: z.url(),
-  audioUrl: z.url(),
-  manifestUrl: z.url(),
-  callbackUrl: z.url(),
-  webhookSecret: z.string().min(32),
-});
-
-export type WorkerInput = z.infer<typeof inputSchema>;
 
 async function download(url: string, destination: string): Promise<void> {
   const response = await fetch(url);
@@ -67,24 +56,10 @@ async function ffprobeDuration(path: string): Promise<number> {
   return duration;
 }
 
-async function callback(
-  input: WorkerInput,
-  body: { status: "rendering" | "uploading_output" | "completed" | "failed"; progress?: number; outputUrl?: string; error?: string },
-): Promise<void> {
-  const response = await fetch(input.callbackUrl, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${input.webhookSecret}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`App callback failed (${response.status}).`);
-}
-
 export async function executeRender(rawInput: unknown): Promise<{ outputUrl: string; frames: number }> {
-  const input = inputSchema.parse(rawInput);
-  const directory = await mkdtemp(join(tmpdir(), `storyscroll-${input.jobId}-`));
+  const manifest = createStoryManifestSchema(getMaxAudioDurationSeconds()).parse(rawInput);
+  const renderId = randomUUID();
+  const directory = await mkdtemp(join(tmpdir(), `storyscroll-${renderId}-`));
   try {
     const assetsDirectory = join(directory, "assets");
     await mkdir(assetsDirectory);
@@ -98,19 +73,14 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       resolve(process.cwd(), "public/fonts/LICENSE.txt"),
       join(fontsDirectory, "LICENSE.txt"),
     );
-    const manifestPath = join(assetsDirectory, "manifest.json");
-    const imagePath = join(assetsDirectory, `image${extname(new URL(input.imageUrl).pathname) || ".img"}`);
-    const audioPath = join(assetsDirectory, `audio${extname(new URL(input.audioUrl).pathname) || ".audio"}`);
+    const imagePath = join(assetsDirectory, `image${extname(new URL(manifest.imageUrl).pathname) || ".img"}`);
+    const audioPath = join(assetsDirectory, `audio${extname(new URL(manifest.audioUrl).pathname) || ".audio"}`);
     const outputPath = join(directory, "storyscroll.mp4");
 
     await Promise.all([
-      download(input.manifestUrl, manifestPath),
-      download(input.imageUrl, imagePath),
-      download(input.audioUrl, audioPath),
+      download(manifest.imageUrl, imagePath),
+      download(manifest.audioUrl, audioPath),
     ]);
-    const manifest = createStoryManifestSchema(getMaxAudioDurationSeconds()).parse(
-      JSON.parse(await readFile(manifestPath, "utf8")),
-    );
     const durationSeconds = await ffprobeDuration(audioPath);
     const props = {
       ...manifest,
@@ -119,7 +89,6 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       audioUrl: basename(audioPath),
     };
     const frames = durationToFrames(durationSeconds);
-    await callback(input, { status: "rendering", progress: 0.02 });
 
     const serveUrl = await bundle({
       entryPoint: resolve(process.cwd(), "worker/remotion-entry.tsx"),
@@ -138,7 +107,6 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       throw new Error(`Frame mismatch: expected ${frames}, got ${composition.durationInFrames}.`);
     }
 
-    let lastReported = 0;
     await renderMedia({
       serveUrl,
       composition,
@@ -155,18 +123,10 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
         if (type !== "stitcher") return args;
         return [...args.slice(0, -1), "-movflags", "+faststart", args.at(-1) ?? outputPath];
       },
-      onProgress: ({ progress }) => {
-        if (progress - lastReported >= 0.02 || progress === 1) {
-          lastReported = progress;
-          void callback(input, { status: "rendering", progress: Math.min(0.94, progress * 0.94) })
-            .catch((error) => console.error("Progress callback:", error));
-        }
-      },
     });
 
-    await callback(input, { status: "uploading_output", progress: 0.95 });
     const blob = await put(
-      `renders/${input.jobId}/${basename(outputPath)}`,
+      `renders/${renderId}/${basename(outputPath)}`,
       createReadStream(outputPath),
       {
         access: "public",
@@ -175,14 +135,7 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
         token: process.env.BLOB_READ_WRITE_TOKEN,
       },
     );
-    await callback(input, { status: "completed", progress: 1, outputUrl: blob.url });
     return { outputUrl: blob.url, frames };
-  } catch (error) {
-    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    await callback(input, { status: "failed", error: message }).catch((callbackError) => {
-      console.error("Failure callback:", callbackError);
-    });
-    throw error;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

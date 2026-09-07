@@ -1,20 +1,38 @@
 # StoryScroll
 
-A desktop-first Next.js editor and Dockerized RunPod rendering pipeline for narrated, scrolling
-9:16 H.264 videos.
+A private single-user Next.js editor that turns one vertical image, one ElevenLabs
+narration file, and a pasted transcript into a 1080x1920 MP4.
 
 ## Architecture
 
-1. Preview and text measurement run locally using the shared contract in `src/lib/story.ts`.
-2. The browser obtains tightly scoped tokens from `/api/blob-upload`; `@vercel/blob/client`
-   uploads image, audio, and the exact measured manifest directly to Blob. Large bodies never pass
-   through a Vercel Function.
-3. `/api/render-jobs` validates and stores a durable Neon job, then dispatches to RunPod.
-4. The editor polls the job endpoint while the worker sends secret-authenticated progress callbacks.
-5. RunPod downloads to temporary disk, uses ffprobe for real duration, renders with Remotion, and
-   multipart-streams the MP4 to Blob.
+1. The editor measures and previews the credits locally with Remotion.
+2. Image and audio upload directly to Vercel Blob. Large files never pass through a Vercel function body.
+3. The browser posts the Blob URLs, transcript, duration, and styling to `/api/render-jobs`.
+4. That route dispatches a RunPod Serverless job and returns the RunPod job ID.
+5. React keeps the job ID in memory and polls `/api/render-jobs/[id]`, which reads the RunPod status API.
+6. The worker downloads the assets, renders with Remotion/FFmpeg, uploads the MP4 to Blob, and returns the URL.
 
-There is no production in-memory job store and no browser-visible API/storage credential.
+There is no database, no `render_jobs` table, and no webhook callback.
+
+## Required environment variables
+
+Preview works with none of these set. Export stays disabled and names the missing variables.
+
+| Variable | Where it comes from |
+| --- | --- |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Dashboard → Storage → Blob, or `vercel env pull`. Also set this on the RunPod endpoint so the worker can upload the MP4. |
+| `RUNPOD_API_KEY` | RunPod dashboard → Settings → API Keys. Used only on the Vercel server to start and poll jobs. |
+| `RUNPOD_ENDPOINT_ID` | The ID of the deployed Serverless endpoint (`…/v2/<id>/run`). |
+
+Optional:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAX_IMAGE_UPLOAD_MB` | `20` | Image upload ceiling |
+| `MAX_AUDIO_UPLOAD_MB` | `200` | Audio upload ceiling |
+| `MAX_AUDIO_DURATION_SECONDS` | `3600` | Shared 60-minute limit. Change this to raise or lower the cap. |
+
+Do not set `DATABASE_URL`, `RENDER_WEBHOOK_SECRET`, or `APP_BASE_URL`. They are unused.
 
 ## Local development
 
@@ -24,34 +42,27 @@ copy .env.example .env.local
 npm run dev
 ```
 
-Open `http://localhost:3000`. Preview works without environment variables; export stays disabled
-and lists every missing variable without exposing values. For local export, `APP_BASE_URL` must be
-reachable from RunPod through an HTTPS tunnel rather than localhost.
+Open `http://localhost:3000`. You can preview without credentials. For a real export, fill the three required variables and deploy the worker.
 
-## Vercel Blob and Neon
+## Vercel
 
-1. Create and connect a Vercel Blob store. Keep `BLOB_READ_WRITE_TOKEN` server-only.
-2. Create/connect Neon and set its pooled `DATABASE_URL`.
-3. Set `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, a random 32+ character
-   `RENDER_WEBHOOK_SECRET`, and canonical HTTPS `APP_BASE_URL`.
-4. Optionally set `MAX_IMAGE_UPLOAD_MB`, `MAX_AUDIO_UPLOAD_MB`, and
-   `MAX_AUDIO_DURATION_SECONDS` (defaults 20 MB, 200 MB, and 3600 seconds).
-5. Redeploy. The first database operation idempotently creates `render_jobs`.
+1. Create or connect a Vercel Blob store to this project.
+2. Confirm `BLOB_READ_WRITE_TOKEN` is present in the project environment.
+3. Add `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID` after the worker is deployed.
+4. Redeploy. `/api/configuration` should return `configured: true`.
 
-Accepted images are JPEG, PNG, and WebP. Accepted audio is MP3, WAV, M4A/MP4 audio, and AAC.
-Blob enforces MIME and size from its generated upload token at storage ingress.
+Accepted images: JPEG, PNG, WebP. Accepted audio: MP3, WAV, M4A/MP4 audio, AAC.
 
 ## RunPod
 
-See `worker/README.md` for exact endpoint setup. Build from the repository root:
+See `worker/README.md`. Build from the repository root:
 
 ```bash
 docker build -f worker/Dockerfile -t your-registry/storyscroll-worker:latest .
 docker push your-registry/storyscroll-worker:latest
 ```
 
-The root context is required because the worker bundles the shared composition. Configure
-`BLOB_READ_WRITE_TOKEN` on the RunPod endpoint.
+The worker only needs `BLOB_READ_WRITE_TOKEN` (and optionally `MAX_AUDIO_DURATION_SECONDS`).
 
 ## Verification
 
@@ -65,37 +76,25 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-`npm run fixtures` generates an original PNG and synthesized WAV. The `.e2e.ts` Playwright test
-covers media selection, transcript editing, preview readiness, and export validation without being
-collected by Vitest.
+`npm run fixtures` generates an original PNG and WAV for the browser test.
 
-Production E2E:
+Production export:
 
-1. Upload media, edit the transcript, and verify the preview.
-2. Export and observe `uploading → queued → rendering → uploading output → completed`.
-3. Download and play the MP4.
-4. In a non-production test, submit corrupt audio and verify failure plus retry with preserved input.
+1. Add image, audio, and transcript, then confirm the 9:16 preview.
+2. Export and watch `uploading → queued → rendering → completed`.
+3. Download the MP4.
+4. Retry after a failure; the transcript and files stay in the editor.
 
-## Limits and common failures
+## Common failures
 
-Audio defaults to a 60-minute maximum. The shared schema default is
-`DEFAULT_MAX_AUDIO_DURATION_SECONDS`; server and worker enforcement read
-`MAX_AUDIO_DURATION_SECONDS` with a 3600-second fallback. The 80,000-character transcript ceiling
-supports hour-long narration while keeping duplicated normalized/wrapped text safely within the
-1 MB manifest envelope; the manifest schema also verifies its serialized byte size.
-
-- Missing-variable list: set all values shown by `/api/configuration`, then redeploy.
-- Blob 400: MIME or size is outside token constraints.
-- Dispatch 401/404: verify RunPod key and endpoint ID.
-- Stuck queued: inspect RunPod endpoint capacity.
-- Callback 401: align `RENDER_WEBHOOK_SECRET`.
-- Callback unreachable: correct `APP_BASE_URL` and deployment protection.
-- Chromium/FFmpeg failure: use the supplied image and inspect RunPod logs.
+- Missing-variable list: set the three required values and redeploy.
+- Blob 400: MIME type or file size is outside the token limits.
+- Dispatch 401/404: check `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`.
+- Stuck queued: inspect RunPod endpoint capacity and logs.
+- Chromium/FFmpeg failure: use the supplied Docker image and read RunPod logs.
 
 ## Privacy
 
-This MVP uses public Blob URLs so RunPod can fetch assets reliably. URLs are hard to guess but
-bearer-readable by anyone who obtains them. Sensitive deployments need private storage or
-short-lived signed downloads plus retention/deletion.
+This MVP uses public Blob URLs so RunPod can fetch assets. Anyone who obtains a URL can read that file.
 
-Inter is bundled under SIL Open Font License 1.1; see `public/fonts/LICENSE.txt`.
+Inter is bundled under the SIL Open Font License 1.1; see `public/fonts/LICENSE.txt`.

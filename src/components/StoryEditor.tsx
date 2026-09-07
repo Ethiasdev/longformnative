@@ -18,7 +18,6 @@ import {
   durationToFrames,
   normalizeTranscript,
   storyManifestSchema,
-  type StoryManifest,
   type StoryCompositionProps,
   type StorySettings,
 } from "@/lib/story";
@@ -257,7 +256,7 @@ export function StoryEditor() {
   const startExport = async () => {
     if (!image || !audio || !previewProps) return;
     try {
-      const manifest: StoryManifest = storyManifestSchema.parse({
+      const measured = storyManifestSchema.parse({
         ...previewProps,
         transcript: normalizeTranscript(transcript),
       });
@@ -265,10 +264,13 @@ export function StoryEditor() {
       const uploaded = await uploadExportAssets({
         imageFile: image.file,
         audioFile: audio.file,
-        manifest,
         onProgress: (progress) => setExportStatus({ state: "uploading", progress }),
       });
-      const jobId = await createExportJob(uploaded);
+      const jobId = await createExportJob({
+        ...measured,
+        imageUrl: uploaded.imageUrl,
+        audioUrl: uploaded.audioUrl,
+      });
       setExportStatus({ state: "queued", jobId, progress: 0 });
     } catch (error) {
       setExportStatus({

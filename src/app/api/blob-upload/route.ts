@@ -6,18 +6,16 @@ import { AUDIO_MIME_TYPES, IMAGE_MIME_TYPES } from "@/lib/story";
 export const runtime = "nodejs";
 
 const clientPayloadSchema = z.object({
-  kind: z.enum(["image", "audio", "manifest"]),
+  kind: z.enum(["image", "audio"]),
 });
 
 const contentTypes = {
   image: IMAGE_MIME_TYPES,
   audio: AUDIO_MIME_TYPES,
-  manifest: ["application/json"],
 } as const;
 const extensions = {
   image: /\.(?:jpe?g|png|webp)$/i,
   audio: /\.(?:mp3|wav|m4a|aac)$/i,
-  manifest: /\.json$/i,
 } as const;
 
 export async function POST(request: Request): Promise<Response> {
@@ -37,8 +35,7 @@ export async function POST(request: Request): Promise<Response> {
         }
         return {
           allowedContentTypes: [...contentTypes[parsed.kind]],
-          maximumSizeInBytes:
-            parsed.kind === "manifest" ? 1024 * 1024 : getMaxUploadBytes(parsed.kind),
+          maximumSizeInBytes: getMaxUploadBytes(parsed.kind),
           addRandomSuffix: true,
           tokenPayload: JSON.stringify({ kind: parsed.kind }),
         };

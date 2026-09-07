@@ -35,6 +35,6 @@ test("selects media, edits transcript, prepares preview, and validates export co
 
   const exportButton = page.getByRole("button", { name: "Export MP4" });
   await expect(exportButton).toBeDisabled();
-  await expect(page.getByText(/Export unavailable: missing/)).toContainText("DATABASE_URL");
+  await expect(page.getByText(/Export unavailable: missing/)).toContainText("BLOB_READ_WRITE_TOKEN");
   expect(browserErrors).toEqual([]);
 });
