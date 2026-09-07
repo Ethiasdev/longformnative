@@ -3,22 +3,42 @@ import subprocess
 
 import runpod
 
+PROGRESS_PREFIX = "__STORYSCROLL_PROGRESS__"
+
 
 def handler(job):
-    completed = subprocess.run(
+    process = subprocess.Popen(
         ["node", "worker/dist/worker/node-handler.js"],
-        input=json.dumps(job.get("input", {})),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        capture_output=True,
-        check=False,
+        bufsize=1,
     )
-    if completed.stderr:
-        print(completed.stderr, flush=True)
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    process.stdin.write(json.dumps(job.get("input", {})))
+    process.stdin.close()
+
+    for line in process.stderr:
+        message = line.rstrip()
+        if message.startswith(PROGRESS_PREFIX):
+            try:
+                progress = json.loads(message[len(PROGRESS_PREFIX):])
+                runpod.serverless.progress_update(job, progress)
+            except (json.JSONDecodeError, TypeError, ValueError) as error:
+                print(f"Invalid renderer progress update: {error}", flush=True)
+        elif message:
+            print(message, flush=True)
+
+    stdout = process.stdout.read()
+    return_code = process.wait()
     try:
-        result = json.loads(completed.stdout)
+        result = json.loads(stdout)
     except json.JSONDecodeError as error:
-        raise RuntimeError(f"Node renderer returned invalid JSON: {completed.stdout[-1000:]}") from error
-    if completed.returncode != 0 or not result.get("ok"):
+        raise RuntimeError(f"Node renderer returned invalid JSON: {stdout[-1000:]}") from error
+    if return_code != 0 or not result.get("ok"):
         detail = result.get("error", {})
         raise RuntimeError(f"{detail.get('name', 'RenderError')}: {detail.get('message', 'Render failed')}")
     return result

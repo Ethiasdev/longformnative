@@ -11,7 +11,7 @@ is available for faster renders.
 2. Image and audio upload directly to Vercel Blob. Large files never pass through a Vercel function body.
 3. The browser posts the Blob URLs, transcript, duration, and styling to `/api/render-jobs`.
 4. That route dispatches a RunPod Serverless job and returns the RunPod job ID.
-5. React keeps the job ID in memory and polls `/api/render-jobs/[id]`, which reads the RunPod status API.
+5. React keeps the job ID in memory and polls `/api/render-jobs/[id]`, which reads live frame progress from the RunPod status API.
 6. The worker downloads the assets, renders with Remotion/FFmpeg, uploads the MP4 to Blob, and returns the URL.
 
 There is no database, no `render_jobs` table, and no webhook callback.
@@ -96,6 +96,8 @@ Production export:
 - Dispatch 401/404: check `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`.
 - Stuck queued: inspect RunPod endpoint capacity and logs.
 - Chromium/FFmpeg failure: use the supplied Docker image and read RunPod logs.
+- Rendering progress now comes from Remotion rather than a fixed placeholder. The worker uses
+  x264 `veryfast` at CRF 18 to keep long CPU renders practical without changing resolution.
 
 ## Privacy
 

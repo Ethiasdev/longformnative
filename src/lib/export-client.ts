@@ -13,7 +13,7 @@ export type ExportStatus =
 
 const jobResponseSchema = z.object({
   id: z.string().min(1),
-  status: z.enum(["queued", "rendering", "completed", "failed"]),
+  status: z.enum(["queued", "rendering", "uploading_output", "completed", "failed"]),
   progress: z.number().min(0).max(1),
   outputUrl: z.url().nullable(),
   error: z.string().nullable(),

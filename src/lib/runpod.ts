@@ -18,6 +18,8 @@ const runpodOutputSchema = z.object({
   ok: z.boolean().optional(),
   outputUrl: z.url().optional(),
   frames: z.number().optional(),
+  progress: z.number().min(0).max(1).optional(),
+  stage: z.string().optional(),
   error: z.union([z.string(), z.object({ message: z.string() })]).optional(),
 });
 
@@ -30,7 +32,7 @@ const runpodStatusSchema = z.object({
 
 export type MappedRunpodJob = {
   id: string;
-  status: "queued" | "rendering" | "completed" | "failed";
+  status: "queued" | "rendering" | "uploading_output" | "completed" | "failed";
   progress: number;
   outputUrl: string | null;
   error: string | null;
@@ -92,10 +94,12 @@ export function mapRunpodJob(jobId: string, raw: unknown): MappedRunpodJob {
     };
   }
 
+  const isRunning = status === "IN_PROGRESS" || status === "RUNNING";
+  const isUploading = isRunning && output?.stage === "uploading_output";
   return {
     id: jobId,
-    status: status === "IN_PROGRESS" ? "rendering" : "queued",
-    progress: status === "IN_PROGRESS" ? 0.15 : 0,
+    status: isUploading ? "uploading_output" : isRunning ? "rendering" : "queued",
+    progress: isRunning ? output?.progress ?? 0.01 : 0,
     outputUrl: null,
     error: null,
   };

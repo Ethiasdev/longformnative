@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -14,6 +14,17 @@ import {
   createStoryManifestSchema,
   durationToFrames,
 } from "../src/lib/story.js";
+
+const PROGRESS_PREFIX = "__STORYSCROLL_PROGRESS__";
+
+function reportProgress(stage: string, progress: number): void {
+  process.stderr.write(
+    `${PROGRESS_PREFIX}${JSON.stringify({
+      stage,
+      progress: Math.min(0.99, Math.max(0, progress)),
+    })}\n`,
+  );
+}
 
 function getMaxAudioDurationSeconds(): number {
   const configured = Number(process.env.MAX_AUDIO_DURATION_SECONDS);
@@ -61,6 +72,7 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
   const renderId = randomUUID();
   const directory = await mkdtemp(join(tmpdir(), `storyscroll-${renderId}-`));
   try {
+    reportProgress("preparing", 0.01);
     const assetsDirectory = join(directory, "assets");
     await mkdir(assetsDirectory);
     const fontsDirectory = join(assetsDirectory, "fonts");
@@ -81,6 +93,7 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       download(manifest.imageUrl, imagePath),
       download(manifest.audioUrl, audioPath),
     ]);
+    reportProgress("probing_audio", 0.04);
     const durationSeconds = await ffprobeDuration(audioPath);
     const props = {
       ...manifest,
@@ -90,6 +103,7 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
     };
     const frames = durationToFrames(durationSeconds, manifest.fps);
 
+    reportProgress("bundling", 0.06);
     const serveUrl = await bundle({
       entryPoint: resolve(process.cwd(), "worker/remotion-entry.tsx"),
       rootDir: process.cwd(),
@@ -107,6 +121,8 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       throw new Error(`Frame mismatch: expected ${frames}, got ${composition.durationInFrames}.`);
     }
 
+    let lastReportedPercent = -1;
+    reportProgress("rendering", 0.1);
     await renderMedia({
       serveUrl,
       composition,
@@ -115,16 +131,24 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
       audioCodec: "aac",
       pixelFormat: "yuv420p",
       crf: 18,
-      x264Preset: "medium",
+      x264Preset: "veryfast",
+      concurrency: Math.max(1, Math.min(6, cpus().length - 1)),
       outputLocation: outputPath,
       overwrite: true,
       browserExecutable: process.env.CHROME_PATH,
+      onProgress: ({ progress }) => {
+        const percent = Math.floor(progress * 100);
+        if (percent === lastReportedPercent) return;
+        lastReportedPercent = percent;
+        reportProgress("rendering", 0.1 + progress * 0.84);
+      },
       ffmpegOverride: ({ args, type }) => {
         if (type !== "stitcher") return args;
         return [...args.slice(0, -1), "-movflags", "+faststart", args.at(-1) ?? outputPath];
       },
     });
 
+    reportProgress("uploading_output", 0.95);
     const blob = await put(
       `renders/${renderId}/${basename(outputPath)}`,
       createReadStream(outputPath),
@@ -135,6 +159,7 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
         token: process.env.BLOB_READ_WRITE_TOKEN,
       },
     );
+    reportProgress("finalizing", 0.99);
     return { outputUrl: blob.url, frames };
   } finally {
     await rm(directory, { recursive: true, force: true });

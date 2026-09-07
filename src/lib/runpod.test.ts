@@ -9,9 +9,19 @@ describe("mapRunpodJob", () => {
       progress: 0,
       outputUrl: null,
     });
-    expect(mapRunpodJob("job-1", { status: "IN_PROGRESS" })).toMatchObject({
+    expect(mapRunpodJob("job-1", {
+      status: "IN_PROGRESS",
+      output: { stage: "rendering", progress: 0.42 },
+    })).toMatchObject({
       status: "rendering",
-      progress: 0.15,
+      progress: 0.42,
+    });
+    expect(mapRunpodJob("job-1", {
+      status: "RUNNING",
+      output: { stage: "uploading_output", progress: 0.95 },
+    })).toMatchObject({
+      status: "uploading_output",
+      progress: 0.95,
     });
   });
 
