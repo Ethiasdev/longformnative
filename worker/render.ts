@@ -270,7 +270,6 @@ export async function executeRender(rawInput: unknown): Promise<{ outputUrl: str
         token: process.env.BLOB_READ_WRITE_TOKEN,
       },
     );
-    reportProgress("finalizing", 0.99);
     return { outputUrl: blob.url, frames };
   } finally {
     await rm(directory, { recursive: true, force: true });

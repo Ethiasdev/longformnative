@@ -26,7 +26,11 @@ def handler(job):
         if message.startswith(PROGRESS_PREFIX):
             try:
                 progress = json.loads(message[len(PROGRESS_PREFIX):])
-                runpod.serverless.progress_update(job, progress)
+                # The result must be returned immediately after the output upload.
+                # A final progress_update can leave a queue request stuck at 99%
+                # even though the renderer has already exited and the worker is idle.
+                if progress.get("stage") != "finalizing":
+                    runpod.serverless.progress_update(job, progress)
             except (json.JSONDecodeError, TypeError, ValueError) as error:
                 print(f"Invalid renderer progress update: {error}", flush=True)
         elif message:
