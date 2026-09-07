@@ -125,6 +125,7 @@ const CreditsScroller = memo(function CreditsScroller({
     finalAudioFrame: durationInFrames - 1,
     height,
     textHeight: wrapped.textHeight,
+    lineStep: settings.fontSize * settings.lineHeight,
   });
   const columnLeft = (width - settings.textColumnWidth) / 2;
 

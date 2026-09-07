@@ -28,18 +28,17 @@ const wrap = (transcript: string, maxWidth = 100) =>
   });
 
 describe("transcript normalization and validation", () => {
-  it("only converts Windows line endings and keeps internal blank lines", () => {
+  it("joins manual line wraps and keeps one paragraph break", () => {
     const normalized = normalizeTranscript("  Hello \t world \r\n\r\n\r\n Second  line \r");
-    expect(normalized).toBe("  Hello \t world \n\n\n Second  line ");
+    expect(normalized).toBe("Hello \t world\n\nSecond  line");
     expect(splitSourceLines(normalized)).toEqual([
-      "  Hello \t world ",
+      "Hello \t world",
       "",
-      "",
-      " Second  line ",
+      "Second  line",
     ]);
   });
 
-  it("strips only leading and trailing blank lines", () => {
+  it("strips outer blank lines and preserves paragraphs", () => {
     expect(normalizeTranscript("\n\nFirst\n\nSecond\n\n")).toBe("First\n\nSecond");
   });
 
@@ -93,11 +92,11 @@ describe("measured word-safe wrapping", () => {
     expect(result.textHeight).toBe(calculateTextHeight(3, 10, 1.2));
   });
 
-  it("preserves multiple blank lines as extra line-height spacers", () => {
+  it("collapses multiple blank lines to one readable paragraph spacer", () => {
     const result = wrap("First paragraph.\n\n\n\nSecond paragraph.", 1000);
-    expect(result.blocks.filter((block) => block.kind === "spacer")).toHaveLength(3);
-    expect(result.lineCount).toBe(5);
-    expect(result.textHeight).toBe(5 * 10 * 1.2);
+    expect(result.blocks.filter((block) => block.kind === "spacer")).toHaveLength(1);
+    expect(result.lineCount).toBe(3);
+    expect(result.textHeight).toBe(3 * 10 * 1.2);
   });
 
   it("preview and export calculate identical text height from the same layout", () => {
@@ -113,9 +112,9 @@ describe("measured word-safe wrapping", () => {
     const exportLayout = wrapTranscript(shared);
     expect(exportLayout).toBe(preview);
     expect(exportLayout).toEqual(preview);
-    expect(exportLayout.lineCount).toBe(4);
+    expect(exportLayout.lineCount).toBe(3);
     expect(exportLayout.textHeight).toBe(preview.textHeight);
-    expect(exportLayout.textHeight).toBe(4 * DEFAULT_SETTINGS.fontSize * DEFAULT_SETTINGS.lineHeight);
+    expect(exportLayout.textHeight).toBe(3 * DEFAULT_SETTINGS.fontSize * DEFAULT_SETTINGS.lineHeight);
     const manifest = storyManifestSchema.parse({
       transcript,
       durationSeconds: 60,
@@ -154,7 +153,7 @@ describe("measured word-safe wrapping", () => {
       wrapped,
     };
     const result = storyManifestSchema.parse(manifest);
-    expect(result.transcript).toBe("  one   two\n\n three  ");
+    expect(result.transcript).toBe("one   two\n\nthree");
     expect(reconstructTranscript(result.wrapped.blocks)).toBe(result.transcript);
   });
 });
@@ -207,18 +206,23 @@ describe("layout motion", () => {
   });
 
   it("uses the exact clamped linear start and end formula", () => {
-    const base = { finalAudioFrame: 100, height: 1000, textHeight: 600 };
-    expect(linearScrollY({ ...base, frame: -1 })).toBe(720);
-    expect(linearScrollY({ ...base, frame: 50 })).toBe(150);
-    expect(linearScrollY({ ...base, frame: 100 })).toBe(-420);
-    expect(linearScrollY({ ...base, frame: 101 })).toBe(-420);
+    const base = { finalAudioFrame: 100, height: 1000, textHeight: 600, lineStep: 100 };
+    expect(linearScrollY({ ...base, frame: -1 })).toBe(580);
+    expect(linearScrollY({ ...base, frame: 50 })).toBe(330);
+    expect(linearScrollY({ ...base, frame: 100 })).toBe(80);
+    expect(linearScrollY({ ...base, frame: 101 })).toBe(80);
   });
 
   it("keeps a floating-point Y and a constant step between frames", () => {
-    const base = { finalAudioFrame: 240, height: 1920, textHeight: 733 };
+    const base = {
+      finalAudioFrame: 240,
+      height: 1920,
+      textHeight: 733,
+      lineStep: 68 * 1.22,
+    };
     const values = [0, 1, 2, 3].map((frame) => linearScrollY({ ...base, frame }));
     const step = values[1]! - values[0]!;
-    expect(values[0]).toBe(1920 * 0.72);
+    expect(values[0]).toBe(1920 * 0.58);
     expect(Number.isInteger(values[1]!)).toBe(false);
     expect(values[1]).not.toBe(Math.round(values[1]!));
     expect(values[2]! - values[1]!).toBeCloseTo(step, 10);
@@ -226,10 +230,19 @@ describe("layout motion", () => {
   });
 
   it("returns the same Y when a frame is read again after seeking", () => {
-    const sample = { frame: 87, finalAudioFrame: 599, height: 1920, textHeight: 1400 };
+    const sample = {
+      frame: 87,
+      finalAudioFrame: 599,
+      height: 1920,
+      textHeight: 1400,
+      lineStep: 68 * 1.22,
+    };
     expect(linearScrollY(sample)).toBe(linearScrollY(sample));
-    expect(linearScrollY({ ...sample, frame: 0 })).toBe(1920 * 0.72);
-    expect(linearScrollY({ ...sample, frame: 599 })).toBeCloseTo(1920 * 0.18 - 1400, 10);
+    expect(linearScrollY({ ...sample, frame: 0 })).toBe(1920 * 0.58);
+    expect(linearScrollY({ ...sample, frame: 599 })).toBeCloseTo(
+      1920 * 0.58 - (1400 - 68 * 1.22),
+      10,
+    );
   });
 
   it("reuses the same wrapped layout object when inputs are unchanged", () => {

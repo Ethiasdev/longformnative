@@ -93,8 +93,10 @@ export function createCreditsAss(params: {
   lines: string[];
 }): string {
   const lineStep = params.fontSize * params.lineHeight;
-  const startY = VIDEO_HEIGHT * 0.72;
-  const endY = VIDEO_HEIGHT * 0.18 - params.textHeight;
+  const readingY = VIDEO_HEIGHT * 0.58;
+  const scrollDistance = Math.max(0, params.textHeight - lineStep);
+  const startY = readingY;
+  const endY = readingY - scrollDistance;
   const durationMs = Math.max(1, Math.round(params.durationSeconds * 1000));
   const endTimestamp = assTimestamp(params.durationSeconds);
   const header = `[Script Info]

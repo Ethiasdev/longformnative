@@ -169,7 +169,18 @@ const normalizeCache = new Map<string, string>();
 export function normalizeTranscript(value: string): string {
   const cached = normalizeCache.get(value);
   if (cached !== undefined) return cached;
-  const normalized = value.replace(/\r\n?/g, "\n").replace(/^\n+/, "").replace(/\n+$/, "");
+  const normalized = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\s*\n+/, "")
+    .replace(/\n+\s*$/, "")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" "))
+    .filter(Boolean)
+    .join("\n\n");
   if (normalizeCache.size > 64) normalizeCache.clear();
   normalizeCache.set(value, normalized);
   return normalized;
@@ -313,9 +324,12 @@ export function linearScrollY(params: {
   finalAudioFrame: number;
   height: number;
   textHeight: number;
+  lineStep: number;
 }): number {
-  const startY = params.height * 0.72;
-  const endY = params.height * 0.18 - params.textHeight;
+  const readingY = params.height * 0.58;
+  const scrollDistance = Math.max(0, params.textHeight - params.lineStep);
+  const startY = readingY;
+  const endY = readingY - scrollDistance;
   const progress =
     params.finalAudioFrame <= 0
       ? 1
