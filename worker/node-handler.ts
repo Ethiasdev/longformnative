@@ -6,9 +6,15 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function writeResultAndExit(value: unknown, exitCode: number): void {
+  process.stdout.write(JSON.stringify(value), () => {
+    process.stdout.end(() => process.exit(exitCode));
+  });
+}
+
 try {
   const result = await executeRender(JSON.parse(await readStdin()));
-  process.stdout.write(JSON.stringify({ ok: true, ...result }));
+  writeResultAndExit({ ok: true, ...result }, 0);
 } catch (error) {
   const structured = {
     ok: false,
@@ -16,6 +22,5 @@ try {
       ? { name: error.name, message: error.message, stack: error.stack }
       : { name: "UnknownError", message: String(error) },
   };
-  process.stdout.write(JSON.stringify(structured));
-  process.exitCode = 1;
+  writeResultAndExit(structured, 1);
 }
