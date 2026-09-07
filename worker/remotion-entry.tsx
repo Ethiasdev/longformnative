@@ -17,7 +17,7 @@ const placeholder: StoryCompositionProps = {
   fps: DEFAULT_FPS,
   settings: DEFAULT_SETTINGS,
   wrapped: {
-    paragraphs: [{ lines: ["StoryScroll"] }],
+    blocks: [{ kind: "text", source: "StoryScroll", lines: ["StoryScroll"] }],
     lineCount: 1,
     textHeight: DEFAULT_SETTINGS.fontSize * DEFAULT_SETTINGS.lineHeight,
   },

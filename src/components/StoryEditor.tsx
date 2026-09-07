@@ -156,9 +156,8 @@ export function StoryEditor() {
       fontSize: settings.fontSize,
       textColumnWidth: settings.textColumnWidth,
       lineHeight: settings.lineHeight,
-      paragraphGap: settings.paragraphGap,
     }),
-    [settings.fontSize, settings.lineHeight, settings.paragraphGap, settings.textColumnWidth],
+    [settings.fontSize, settings.lineHeight, settings.textColumnWidth],
   );
   const layoutResult = useMemo(() => {
     if (fontState !== "ready") return { wrapped: null, error: null };
@@ -341,8 +340,8 @@ export function StoryEditor() {
               <textarea
                 value={transcript}
                 onChange={(event) => setTranscript(event.target.value)}
-                className="field min-h-64 resize-y leading-7"
-                placeholder="Paste your transcript. Blank lines preserve paragraphs."
+                className="field min-h-64 resize-y whitespace-pre-wrap leading-7"
+                placeholder="Paste your transcript. Blank lines are kept as vertical space."
                 spellCheck
               />
             </label>
@@ -352,7 +351,7 @@ export function StoryEditor() {
               </p>
             ) : null}
             <p className="mt-2 text-xs text-zinc-500">
-              Repeated spaces are normalized. Paragraph breaks remain. Words are never split.
+              Blank lines stay as vertical space. Words are never split.
             </p>
             {layoutPending ? (
               <p aria-live="polite" className="mt-2 text-xs text-zinc-400">

@@ -23,7 +23,7 @@ test("selects media, edits transcript, prepares preview, and validates export co
 
   const transcript = page.getByLabel("Transcript");
   await transcript.fill("An original fixture story.\n\nMeasured in the browser.");
-  await expect(transcript).toHaveValue(/Measured in the browser/);
+  await expect(transcript).toHaveValue("An original fixture story.\n\nMeasured in the browser.");
 
   const imageInput = page.getByLabel("Background image");
   const audioInput = page.getByLabel("Narration audio");

@@ -55,12 +55,13 @@ The Vercel route posts this body to `https://api.runpod.ai/v2/<RUNPOD_ENDPOINT_I
       "imageVerticalFocalPosition": 50
     },
     "wrapped": {
-      "paragraphs": [
-        { "lines": ["Every great story begins", "with a moment."] },
-        { "lines": ["Then it continues."] }
+      "blocks": [
+        { "kind": "text", "source": "Every great story begins with a moment.", "lines": ["Every great story begins", "with a moment."] },
+        { "kind": "spacer" },
+        { "kind": "text", "source": "Then it continues.", "lines": ["Then it continues."] }
       ],
-      "lineCount": 3,
-      "textHeight": 282.88
+      "lineCount": 4,
+      "textHeight": 331.84
     }
   }
 }

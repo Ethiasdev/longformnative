@@ -46,8 +46,19 @@ export const settingsSchema = z.object({
   imageVerticalFocalPosition: z.number().min(0).max(100),
 });
 
+export const wrappedBlockSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("text"),
+    source: z.string().min(1),
+    lines: z.array(z.string().min(1)).min(1),
+  }),
+  z.object({
+    kind: z.literal("spacer"),
+  }),
+]);
+
 export const wrappedTranscriptSchema = z.object({
-  paragraphs: z.array(z.object({ lines: z.array(z.string().min(1)).min(1) })).min(1),
+  blocks: z.array(wrappedBlockSchema).min(1),
   lineCount: z.number().int().positive(),
   textHeight: z.number().finite().positive(),
 });
@@ -84,10 +95,7 @@ export function createStoryManifestSchema(
     wrapped: wrappedTranscriptSchema,
   })
   .superRefine((value, context) => {
-    const actualLines = value.wrapped.paragraphs.reduce(
-      (total, paragraph) => total + paragraph.lines.length,
-      0,
-    );
+    const actualLines = countWrappedLines(value.wrapped.blocks);
     if (actualLines !== value.wrapped.lineCount) {
       context.addIssue({
         code: "custom",
@@ -97,10 +105,8 @@ export function createStoryManifestSchema(
     }
     const expectedHeight = calculateTextHeight(
       value.wrapped.lineCount,
-      value.wrapped.paragraphs.length,
       value.settings.fontSize,
       value.settings.lineHeight,
-      value.settings.paragraphGap,
     );
     if (Math.abs(expectedHeight - value.wrapped.textHeight) > 0.001) {
       context.addIssue({
@@ -109,10 +115,7 @@ export function createStoryManifestSchema(
         message: "textHeight does not match the fixed typography settings.",
       });
     }
-    const wrappedText = value.wrapped.paragraphs
-      .map((paragraph) => paragraph.lines.join(" "))
-      .join("\n\n");
-    if (wrappedText !== value.transcript) {
+    if (reconstructTranscript(value.wrapped.blocks) !== value.transcript) {
       context.addIssue({
         code: "custom",
         path: ["wrapped"],
@@ -132,8 +135,7 @@ export const storyManifestSchema = createStoryManifestSchema();
 
 export type StorySettings = z.infer<typeof settingsSchema>;
 export type StoryManifest = z.infer<typeof storyManifestSchema>;
-
-export type WrappedParagraph = { lines: string[] };
+export type WrappedBlock = z.infer<typeof wrappedBlockSchema>;
 export type WrappedTranscript = z.infer<typeof wrappedTranscriptSchema>;
 
 export type StoryCompositionProps = {
@@ -148,7 +150,7 @@ export type StoryCompositionProps = {
 export type MeasureText = (value: string) => number;
 export type OversizedToken = {
   token: string;
-  paragraphIndex: number;
+  lineIndex: number;
   measuredWidth: number;
 };
 
@@ -167,21 +169,28 @@ const normalizeCache = new Map<string, string>();
 export function normalizeTranscript(value: string): string {
   const cached = normalizeCache.get(value);
   if (cached !== undefined) return cached;
-  const normalized = value
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const normalized = value.replace(/\r\n?/g, "\n").replace(/^\n+/, "").replace(/\n+$/, "");
   if (normalizeCache.size > 64) normalizeCache.clear();
   normalizeCache.set(value, normalized);
   return normalized;
 }
 
-export function splitParagraphs(value: string): string[] {
+export function splitSourceLines(value: string): string[] {
   const normalized = normalizeTranscript(value);
-  return normalized ? normalized.split(/\n\s*\n/) : [];
+  return normalized ? normalized.split("\n") : [];
+}
+
+export function countWrappedLines(blocks: WrappedBlock[]): number {
+  return blocks.reduce(
+    (total, block) => total + (block.kind === "spacer" ? 1 : block.lines.length),
+    0,
+  );
+}
+
+export function reconstructTranscript(blocks: WrappedBlock[]): string {
+  return blocks
+    .map((block) => (block.kind === "spacer" ? "" : block.source))
+    .join("\n");
 }
 
 export function findOversizedTokens(params: {
@@ -189,24 +198,25 @@ export function findOversizedTokens(params: {
   maxWidth: number;
   measure: MeasureText;
 }): OversizedToken[] {
-  return splitParagraphs(params.transcript).flatMap((paragraph, paragraphIndex) =>
-    paragraph
-      .split(/\s+/)
+  return splitSourceLines(params.transcript).flatMap((line, lineIndex) => {
+    if (line === "") return [];
+    const tokens = line.match(/\S+/g) ?? (params.measure(line) > params.maxWidth ? [line] : []);
+    return tokens
       .filter((token) => params.measure(token) > params.maxWidth)
       .map((token) => ({
         token,
-        paragraphIndex,
+        lineIndex,
         measuredWidth: params.measure(token),
-      })),
-  );
+      }));
+  });
 }
 
 export function createMeasuredTranscriptSchema(maxWidth: number, measure: MeasureText) {
   return transcriptSchema.superRefine((transcript, context) => {
-    findOversizedTokens({ transcript, maxWidth, measure }).forEach(({ token, paragraphIndex }) => {
+    findOversizedTokens({ transcript, maxWidth, measure }).forEach(({ token, lineIndex }) => {
       context.addIssue({
         code: "custom",
-        message: `Paragraph ${paragraphIndex + 1}: “${token}” is too wide to fit without splitting.`,
+        message: `Line ${lineIndex + 1}: “${token}” is too wide to fit without splitting.`,
       });
     });
   });
@@ -219,13 +229,30 @@ export function durationToFrames(seconds: number, fps: number = DEFAULT_FPS): nu
 
 export function calculateTextHeight(
   lineCount: number,
-  paragraphCount: number,
   fontSize: number,
   lineHeight: number,
-  paragraphGap: number,
 ): number {
   if (lineCount === 0) return 0;
-  return lineCount * fontSize * lineHeight + Math.max(0, paragraphCount - 1) * paragraphGap;
+  return lineCount * fontSize * lineHeight;
+}
+
+function wrapSourceLine(line: string, maxWidth: number, measure: MeasureText): string[] {
+  if (measure(line) <= maxWidth) return [line];
+  const words = line.match(/\S+/g);
+  if (!words) return [line];
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (measure(candidate) <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 const wrapCache = new Map<string, WrappedTranscript>();
@@ -235,15 +262,8 @@ export function wrapCacheKey(params: {
   maxWidth: number;
   fontSize: number;
   lineHeight: number;
-  paragraphGap: number;
 }): string {
-  return [
-    params.transcript,
-    params.maxWidth,
-    params.fontSize,
-    params.lineHeight,
-    params.paragraphGap,
-  ].join("\u001f");
+  return [params.transcript, params.maxWidth, params.fontSize, params.lineHeight].join("\u001f");
 }
 
 export function wrapTranscript(params: {
@@ -252,7 +272,6 @@ export function wrapTranscript(params: {
   measure: MeasureText;
   fontSize: number;
   lineHeight: number;
-  paragraphGap: number;
 }): WrappedTranscript {
   const cacheKey = wrapCacheKey(params);
   const cached = wrapCache.get(cacheKey);
@@ -265,32 +284,20 @@ export function wrapTranscript(params: {
     throw new Error(result.error.issues.map((issue) => issue.message).join("\n"));
   }
 
-  const paragraphs = splitParagraphs(result.data).map((paragraph) => {
-    const lines: string[] = [];
-    let current = "";
-    for (const word of paragraph.split(/\s+/)) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (params.measure(candidate) <= params.maxWidth) {
-        current = candidate;
-      } else {
-        lines.push(current);
-        current = word;
-      }
-    }
-    if (current) lines.push(current);
-    return { lines };
-  });
-  const lineCount = paragraphs.reduce((sum, paragraph) => sum + paragraph.lines.length, 0);
+  const blocks = splitSourceLines(result.data).map((line) =>
+    line === ""
+      ? { kind: "spacer" as const }
+      : {
+          kind: "text" as const,
+          source: line,
+          lines: wrapSourceLine(line, params.maxWidth, params.measure),
+        },
+  );
+  const lineCount = countWrappedLines(blocks);
   const wrapped = {
-    paragraphs,
+    blocks,
     lineCount,
-    textHeight: calculateTextHeight(
-      lineCount,
-      paragraphs.length,
-      params.fontSize,
-      params.lineHeight,
-      params.paragraphGap,
-    ),
+    textHeight: calculateTextHeight(lineCount, params.fontSize, params.lineHeight),
   };
   if (wrapCache.size > 32) wrapCache.clear();
   wrapCache.set(cacheKey, wrapped);

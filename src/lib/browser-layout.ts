@@ -7,7 +7,7 @@ import {
 
 export type LayoutSettings = Pick<
   StorySettings,
-  "fontSize" | "textColumnWidth" | "lineHeight" | "paragraphGap"
+  "fontSize" | "textColumnWidth" | "lineHeight"
 >;
 
 export function measureAndWrapTranscript(
@@ -27,6 +27,5 @@ export function measureAndWrapTranscript(
     measure: (value) => context.measureText(value).width,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
-    paragraphGap: settings.paragraphGap,
   });
 }

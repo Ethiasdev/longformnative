@@ -73,12 +73,13 @@ async function renderSample(fps, outputPath) {
       imageVerticalFocalPosition: 50,
     },
     wrapped: {
-      paragraphs: [
-        { lines: ["Smooth credits sample"] },
-        { lines: ["Frame rate", `${fps} FPS`] },
+      blocks: [
+        { kind: "text", source: "Smooth credits sample", lines: ["Smooth credits sample"] },
+        { kind: "spacer" },
+        { kind: "text", source: `Frame rate ${fps} FPS`, lines: ["Frame rate", `${fps} FPS`] },
       ],
-      lineCount: 3,
-      textHeight: 68 * 1.22 * 3 + 34,
+      lineCount: 4,
+      textHeight: 68 * 1.22 * 4,
     },
   };
   const composition = await selectComposition({

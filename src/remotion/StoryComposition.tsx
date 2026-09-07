@@ -79,23 +79,34 @@ const CreditsColumn = memo(function CreditsColumn({
   settings: StorySettings;
   wrapped: WrappedTranscript;
 }) {
+  const spacerHeight = settings.fontSize * settings.lineHeight;
   return (
     <>
-      {wrapped.paragraphs.map((paragraph, paragraphIndex) => (
-        <div
-          key={paragraphIndex}
-          style={{
-            marginBottom:
-              paragraphIndex < wrapped.paragraphs.length - 1
-                ? settings.paragraphGap
-                : 0,
-          }}
-        >
-          {paragraph.lines.map((line, lineIndex) => (
-            <div key={lineIndex}>{line}</div>
-          ))}
-        </div>
-      ))}
+      {wrapped.blocks.map((block, blockIndex) =>
+        block.kind === "spacer" ? (
+          <div
+            key={`spacer-${blockIndex}`}
+            aria-hidden
+            style={{ height: spacerHeight }}
+          />
+        ) : (
+          <div key={`text-${blockIndex}`}>
+            {block.lines.map((line, lineIndex) => (
+              <div
+                key={lineIndex}
+                style={{
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "normal",
+                  overflowWrap: "normal",
+                  hyphens: "none",
+                }}
+              >
+                {line}
+              </div>
+            ))}
+          </div>
+        ),
+      )}
     </>
   );
 });

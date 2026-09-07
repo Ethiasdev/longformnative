@@ -9,8 +9,9 @@ import {
   editorInputSchema,
   linearScrollY,
   normalizeTranscript,
+  reconstructTranscript,
   settingsSchema,
-  splitParagraphs,
+  splitSourceLines,
   storyManifestSchema,
   transcriptSchema,
   wrapTranscript,
@@ -24,14 +25,22 @@ const wrap = (transcript: string, maxWidth = 100) =>
     measure: monospace,
     fontSize: 10,
     lineHeight: 1.2,
-    paragraphGap: 7,
   });
 
 describe("transcript normalization and validation", () => {
-  it("normalizes line endings and repeated spaces without losing paragraphs", () => {
+  it("only converts Windows line endings and keeps internal blank lines", () => {
     const normalized = normalizeTranscript("  Hello \t world \r\n\r\n\r\n Second  line \r");
-    expect(normalized).toBe("Hello world\n\nSecond line");
-    expect(splitParagraphs(normalized)).toEqual(["Hello world", "Second line"]);
+    expect(normalized).toBe("  Hello \t world \n\n\n Second  line ");
+    expect(splitSourceLines(normalized)).toEqual([
+      "  Hello \t world ",
+      "",
+      "",
+      " Second  line ",
+    ]);
+  });
+
+  it("strips only leading and trailing blank lines", () => {
+    expect(normalizeTranscript("\n\nFirst\n\nSecond\n\n")).toBe("First\n\nSecond");
   });
 
   it("supports a 60-minute-safe transcript limit", () => {
@@ -50,17 +59,76 @@ describe("transcript normalization and validation", () => {
 describe("measured word-safe wrapping", () => {
   it("uses exact measured widths and never splits director", () => {
     const result = wrap("the director returns", 110);
-    expect(result.paragraphs[0]?.lines).toEqual(["the", "director", "returns"]);
-    expect(result.paragraphs.flatMap((paragraph) => paragraph.lines)).toContain("director");
+    expect(result.blocks[0]).toEqual({
+      kind: "text",
+      source: "the director returns",
+      lines: ["the", "director", "returns"],
+    });
+    const rendered = result.blocks.flatMap((block) =>
+      block.kind === "text" ? block.lines : [],
+    );
+    expect(rendered).toContain("director");
+    expect(rendered.join(" ")).toBe("the director returns");
+    expect(rendered.some((line) => /dire|ctor/.test(line) && !line.includes("director"))).toBe(
+      false,
+    );
   });
 
-  it("keeps exact-width lines and paragraph boundaries", () => {
-    const result = wrap("one two\n\nthree four", 90);
-    expect(result.paragraphs).toEqual([
-      { lines: ["one two"] },
-      { lines: ["three", "four"] },
+  it("wraps long sentences only at spaces", () => {
+    const result = wrap("one two three four", 90);
+    expect(result.blocks).toEqual([
+      { kind: "text", source: "one two three four", lines: ["one two", "three", "four"] },
     ]);
-    expect(result.textHeight).toBe(3 * 10 * 1.2 + 7);
+  });
+
+  it("one blank line creates one line-height of spacing", () => {
+    const result = wrap("First paragraph.\n\nSecond paragraph.", 1000);
+    expect(result.blocks).toEqual([
+      { kind: "text", source: "First paragraph.", lines: ["First paragraph."] },
+      { kind: "spacer" },
+      { kind: "text", source: "Second paragraph.", lines: ["Second paragraph."] },
+    ]);
+    expect(result.lineCount).toBe(3);
+    expect(result.textHeight).toBe(3 * 10 * 1.2);
+    expect(result.textHeight).toBe(calculateTextHeight(3, 10, 1.2));
+  });
+
+  it("preserves multiple blank lines as extra line-height spacers", () => {
+    const result = wrap("First paragraph.\n\n\n\nSecond paragraph.", 1000);
+    expect(result.blocks.filter((block) => block.kind === "spacer")).toHaveLength(3);
+    expect(result.lineCount).toBe(5);
+    expect(result.textHeight).toBe(5 * 10 * 1.2);
+  });
+
+  it("preview and export calculate identical text height from the same layout", () => {
+    const transcript = "First paragraph.\n\n\nSecond paragraph.";
+    const shared = {
+      transcript,
+      maxWidth: 1000,
+      measure: monospace,
+      fontSize: DEFAULT_SETTINGS.fontSize,
+      lineHeight: DEFAULT_SETTINGS.lineHeight,
+    };
+    const preview = wrapTranscript(shared);
+    const exportLayout = wrapTranscript(shared);
+    expect(exportLayout).toBe(preview);
+    expect(exportLayout).toEqual(preview);
+    expect(exportLayout.lineCount).toBe(4);
+    expect(exportLayout.textHeight).toBe(preview.textHeight);
+    expect(exportLayout.textHeight).toBe(4 * DEFAULT_SETTINGS.fontSize * DEFAULT_SETTINGS.lineHeight);
+    const manifest = storyManifestSchema.parse({
+      transcript,
+      durationSeconds: 60,
+      fps: 60,
+      imageUrl: "https://example.com/image.jpg",
+      audioUrl: "https://example.com/audio.mp3",
+      settings: DEFAULT_SETTINGS,
+      wrapped: preview,
+    });
+    expect(manifest.wrapped.textHeight).toBe(preview.textHeight);
+    expect(manifest.wrapped.textHeight).toBe(
+      calculateTextHeight(manifest.wrapped.lineCount, DEFAULT_SETTINGS.fontSize, DEFAULT_SETTINGS.lineHeight),
+    );
   });
 
   it("produces a manifest identical to normalized layout text", () => {
@@ -71,7 +139,6 @@ describe("measured word-safe wrapping", () => {
       measure: monospace,
       fontSize: 54,
       lineHeight: 1.2,
-      paragraphGap: 16,
     });
     const manifest = {
       transcript,
@@ -83,15 +150,12 @@ describe("measured word-safe wrapping", () => {
         ...DEFAULT_SETTINGS,
         fontSize: 54,
         lineHeight: 1.2,
-        paragraphGap: 16,
       },
       wrapped,
     };
     const result = storyManifestSchema.parse(manifest);
-    expect(result.transcript).toBe("one two\n\nthree");
-    expect(
-      result.wrapped.paragraphs.map((paragraph) => paragraph.lines.join(" ")).join("\n\n"),
-    ).toBe(result.transcript);
+    expect(result.transcript).toBe("  one   two\n\n three  ");
+    expect(reconstructTranscript(result.wrapped.blocks)).toBe(result.transcript);
   });
 });
 
@@ -137,8 +201,9 @@ describe("settings and duration", () => {
 });
 
 describe("layout motion", () => {
-  it("calculates line boxes plus the exact paragraph gap", () => {
-    expect(calculateTextHeight(4, 2, 20, 1.2, 34)).toBe(130);
+  it("includes empty lines in the total text height", () => {
+    expect(calculateTextHeight(4, 20, 1.2)).toBe(96);
+    expect(calculateTextHeight(1, 68, 1.22)).toBe(68 * 1.22);
   });
 
   it("uses the exact clamped linear start and end formula", () => {
